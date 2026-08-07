@@ -1,0 +1,74 @@
+{
+  "name": "retype",
+  "displayName": "retype",
+  "description": "AI가 코드를 적용하는 대신 불러준다. 사람이 직접 친다.",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "categories": [
+    "AI",
+    "Education"
+  ],
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "retype",
+        "label": "retype"
+      }
+    ],
+    "commands": [
+      {
+        "command": "retype.askViewport",
+        "title": "retype: 이 구간 물어보기"
+      },
+      {
+        "command": "retype.cancel",
+        "title": "retype: 따라쓰기 취소"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "retype.askViewport",
+        "key": "cmd+k q",
+        "mac": "cmd+k q",
+        "win": "ctrl+k q",
+        "linux": "ctrl+k q"
+      },
+      {
+        "command": "retype.cancel",
+        "key": "escape",
+        "when": "editorTextFocus && retype.active"
+      }
+    ],
+    "configuration": {
+      "title": "retype",
+      "properties": {
+        "retype.timeoutMinutes": {
+          "type": "number",
+          "default": 10,
+          "description": "따라쓰기 중 입력이 없을 때 포기할 때까지의 분."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . -w",
+    "test": "tsc -p . && node out/match.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.101.0",
+    "typescript": "^5.6.0"
+  }
+}
