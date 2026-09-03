@@ -58,6 +58,10 @@ npm run install:local   # vsix 빌드 → code --install-extension
 **Claude Code 익스텐션이 깔려 있으면 이걸로 끝.** `Cmd+K I`는 그 익스텐션에 든 `claude` 바이너리를 쓰고,
 MCP는 실행할 때 `--mcp-config`로 넘기니까 따로 등록할 게 없다. 없으면 `claude` CLI가 PATH에 있으면 된다.
 
+**Codex**도 된다. `retype.agent`를 `codex`로. OpenAI(Codex) 익스텐션의 바이너리 → PATH 순으로 찾고,
+`codex exec --json -s read-only -c mcp_servers.retype.url=…`로 돈다. read-only 샌드박스라 파일을 못 고치니
+propose를 안 쓸 도리가 없다. 이어 묻기는 `exec resume <thread>`.
+
 개발: `npm test`(match 유닛), `npm run test:e2e`(진짜 VS Code 띄워서 MCP 클라이언트로 붙는 검사),
 F5(`익스텐션 실행`).
 
@@ -94,7 +98,8 @@ Copilot agent mode는 익스텐션이 등록해두므로 그냥 보인다. VS Co
 ## 설정
 
 `retype.port` (기본 41773) — MCP 서버 포트. 0이면 랜덤.
-`retype.claudePath` (기본 비움) — `Cmd+K I`가 띄울 CLI. 비우면 Claude Code 익스텐션 바이너리 → PATH 순.
+`retype.agent` (기본 `claude`) — `Cmd+K I`가 부를 에이전트. `claude` | `codex`.
+`retype.claudePath` / `retype.codexPath` (기본 비움) — CLI 경로. 비우면 해당 익스텐션 바이너리 → PATH 순.
 `retype.timeoutMinutes` (기본 10) — 따라쓰기 중 입력이 없을 때 포기할 때까지의 분.
 
 ## 안 하는 것

@@ -2,6 +2,7 @@
 // claude에게 묻는 입력창 + 답 스레드.
 import * as vscode from 'vscode';
 import { spawn, type ChildProcess } from 'node:child_process';
+import * as fs from 'node:fs';
 
 const RULES =
   '코드를 쓸 때는 Edit/Write 대신 retype의 propose(text, why)로 제안한다. 한 번에 한 덩어리(길어야 십여 줄). ' +
@@ -167,30 +168,38 @@ type Hooks = {
   error: (m: string) => void;
 };
 
-/** claude -p를 백그라운드로 돌린다. 코드는 고스트로 오고, 말은 hooks.text로 온다. */
-function runClaude(prompt: string, cwd: string | undefined, resume: string | undefined, on: Hooks) {
-  running?.kill();
+/** 에이전트별로 다른 것: 바이너리 후보, 인자, 이벤트 파싱. 나머지 실행 루프는 같다. */
+type Agent = {
+  name: string;
+  candidates: () => string[];
+  args: (prompt: string, resume: string | undefined) => string[];
+  handle: (msg: any, on: Hooks) => void;
+};
 
-  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-  status.text = '$(sync~spin) claude';
-  status.tooltip = prompt;
-  status.show();
+function setting(key: string) {
+  const v = vscode.workspace.getConfiguration('retype').get<string>(key);
+  return v ? [v] : [];
+}
 
+function mcpUrl() {
+  return `http://127.0.0.1:${mcpPort}/mcp`;
+}
+
+const claude: Agent = {
+  name: 'claude',
   // 순서: 사용자가 지정한 경로 → Claude Code 익스텐션이 들고 있는 바이너리(별도 설치 불필요) → PATH
-  const cfg = vscode.workspace.getConfiguration('retype');
-  const bundled = vscode.extensions.getExtension('anthropic.claude-code')?.extensionPath;
-  const candidates = [
-    ...(cfg.get<string>('claudePath') ? [cfg.get<string>('claudePath')!] : []),
-    ...(bundled ? [`${bundled}/resources/native-binary/claude`] : []),
-    'claude',
-    '/opt/homebrew/bin/claude',
-    '/usr/local/bin/claude',
-  ];
-  const mcp = JSON.stringify({
-    mcpServers: { retype: { type: 'http', url: `http://127.0.0.1:${mcpPort}/mcp` } },
-  });
+  candidates: () => {
+    const ext = vscode.extensions.getExtension('anthropic.claude-code')?.extensionPath;
+    return [
+      ...setting('claudePath'),
+      ...(ext ? [`${ext}/resources/native-binary/claude`] : []),
+      'claude',
+      '/opt/homebrew/bin/claude',
+      '/usr/local/bin/claude',
+    ];
+  },
   // --allowedTools는 가변 인자라 프롬프트가 뒤에 오면 삼킨다. 프롬프트가 먼저.
-  const args = [
+  args: (prompt, resume) => [
     '-p',
     prompt,
     '--output-format',
@@ -199,21 +208,14 @@ function runClaude(prompt: string, cwd: string | undefined, resume: string | und
     '--append-system-prompt',
     RULES,
     '--mcp-config',
-    mcp,
+    JSON.stringify({ mcpServers: { retype: { type: 'http', url: mcpUrl() } } }),
     '--strict-mcp-config',
     '--allowedTools',
     'mcp__retype__propose,mcp__retype__read_viewport',
     ...(resume ? ['--resume', resume] : []),
-  ];
-
+  ],
   // stream-json 한 줄. assistant 텍스트만 건진다. 코드는 propose로 이미 고스트에 떴다.
-  const handle = (line: string) => {
-    let msg: any;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      return;
-    }
+  handle: (msg, on) => {
     if (msg.session_id) on.session(msg.session_id);
     if (msg.type === 'assistant') {
       for (const block of msg.message?.content ?? []) {
@@ -225,6 +227,82 @@ function runClaude(prompt: string, cwd: string | undefined, resume: string | und
     } else if (msg.type === 'result' && msg.is_error) {
       on.error(String(msg.result ?? ''));
     }
+  },
+};
+
+const codex: Agent = {
+  name: 'codex',
+  // 순서: 사용자 지정 → OpenAI(Codex) 익스텐션이 들고 있는 바이너리 → PATH
+  candidates: () => {
+    const ext = vscode.extensions.getExtension('openai.chatgpt')?.extensionPath;
+    let bundled: string[] = [];
+    if (ext) {
+      try {
+        const bin = `${ext}/bin`;
+        bundled = fs
+          .readdirSync(bin)
+          .map((d) => `${bin}/${d}/codex`)
+          .filter((p) => fs.existsSync(p));
+      } catch {
+        // 없으면 그냥 PATH로
+      }
+    }
+    return [...setting('codexPath'), ...bundled, 'codex', '/opt/homebrew/bin/codex', '/usr/local/bin/codex'];
+  },
+  // 시스템 프롬프트 옵션이 없어서 규칙을 프롬프트 앞에 붙인다. read-only 샌드박스라 파일을 못 고치니
+  // propose를 안 쓸 도리가 없다. 전역 옵션은 resume 서브커맨드 앞에 와야 한다.
+  args: (prompt, resume) => [
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '-s',
+    'read-only',
+    '-c',
+    `mcp_servers.retype.url="${mcpUrl()}"`,
+    '-c',
+    'mcp_servers.retype.default_tools_approval_mode="approve"',
+    ...(resume ? ['resume', resume] : []),
+    `${RULES}\n\n${prompt}`,
+  ],
+  handle: (msg, on) => {
+    if (msg.type === 'thread.started' && msg.thread_id) on.session(msg.thread_id);
+    const item = msg.item;
+    if (msg.type === 'item.completed' && item?.type === 'agent_message' && item.text?.trim()) {
+      on.text(item.text);
+    } else if (msg.type === 'item.started' && item?.type === 'mcp_tool_call') {
+      on.tool(String(item.tool), item.arguments ?? {});
+    } else if (msg.type === 'item.completed' && item?.type === 'mcp_tool_call' && item.error) {
+      on.error(String(item.error.message ?? item.error));
+    } else if (msg.type === 'turn.failed' || msg.type === 'error') {
+      on.error(String(msg.error?.message ?? msg.message ?? msg.type));
+    }
+  },
+};
+
+function currentAgent(): Agent {
+  return vscode.workspace.getConfiguration('retype').get<string>('agent') === 'codex' ? codex : claude;
+}
+
+/** 에이전트를 백그라운드로 돌린다. 코드는 고스트로 오고, 말은 hooks.text로 온다. */
+function runClaude(prompt: string, cwd: string | undefined, resume: string | undefined, on: Hooks) {
+  running?.kill();
+  const agent = currentAgent();
+
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+  status.text = `$(sync~spin) ${agent.name}`;
+  status.tooltip = prompt;
+  status.show();
+
+  const candidates = agent.candidates();
+  const args = agent.args(prompt, resume);
+  const handle = (line: string) => {
+    let msg: any;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return;
+    }
+    agent.handle(msg, on);
   };
 
   return new Promise<void>((resolve) => {
@@ -246,12 +324,12 @@ function runClaude(prompt: string, cwd: string | undefined, resume: string | und
       child.stderr.on('data', (c) => out.append(String(c)));
       child.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT' && i + 1 < candidates.length) return start(i + 1);
-        on.error(`claude 실행 실패: ${err.message} — retype.claudePath 설정을 확인해라.`);
+        on.error(`${agent.name} 실행 실패: ${err.message} — retype.${agent.name}Path 설정을 확인해라.`);
         finish(child);
       });
       child.on('close', (code) => {
         // 새 요청이 죽인 거면 조용히. 상태바는 어쨌든 치운다.
-        if (running === child && code) on.error(`claude 종료 코드 ${code}`);
+        if (running === child && code) on.error(`${agent.name} 종료 코드 ${code}`);
         finish(child);
       });
     };

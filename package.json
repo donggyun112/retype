@@ -101,6 +101,17 @@
     "configuration": {
       "title": "retype",
       "properties": {
+        "retype.agent": {
+          "type": "string",
+          "enum": ["claude", "codex"],
+          "default": "claude",
+          "description": "Cmd+K I가 부를 에이전트. claude = Claude Code, codex = OpenAI Codex CLI."
+        },
+        "retype.codexPath": {
+          "type": "string",
+          "default": "",
+          "description": "codex CLI 경로. 비우면 OpenAI(Codex) 익스텐션에 든 바이너리 → PATH 순으로 찾는다."
+        },
         "retype.claudePath": {
           "type": "string",
           "default": "",
