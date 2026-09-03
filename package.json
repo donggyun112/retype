@@ -4,6 +4,7 @@
   "description": "AI가 코드를 적용하는 대신 불러준다. 사람이 직접 친다.",
   "version": "0.1.0",
   "publisher": "dongkseo",
+  "repository": { "type": "git", "url": "https://github.com/donggyun112/retype" },
   "private": true,
   "engines": {
     "vscode": "^1.101.0"

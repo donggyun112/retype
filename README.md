@@ -99,6 +99,16 @@ VS Code 창이 떠 있는 상태에서 터미널의 Claude Code가 `propose`·`r
 - 채팅 UI, LLM 호출, API 키 — 전부 기존 채팅 패널 몫
 - 결정 이력 저장, 오타 통계
 
+## 비슷한 것들
+
+- [Claude Code `Learning` output style](https://code.claude.com/docs/en/output-styles) — Claude가 `TODO(human)`을
+  남기고 사람이 그 조각을 *직접 설계해서* 쓴다. retype은 반대로 설계는 AI가 하고 사람은 *그대로 따라 친다*.
+  Learning은 "네가 생각해 봐", retype은 "네 손으로 지나가 봐".
+- [toggle-tab-completion](https://github.com/stefanoaldegheri/toggle-tab-completion) — 고스트를 통째로 끄는 스위치.
+  안 보이게 하는 것과 보이되 못 받게 하는 건 다르다.
+- 인지부채 담론 — [Comprehension Debt](https://medium.com/@addyosmani/comprehension-debt-the-hidden-cost-of-ai-generated-code-285a25dac57e),
+  [Cognitive and Intent Debt](https://queue.acm.org/detail.cfm?id=3807966). 문제는 다들 말하는데 처방은 "리뷰 잘 해라"에서 끝난다.
+
 ## 한계
 
 **에이전트가 `propose`를 무시하고 파일을 직접 고치는 건 막을 수 없다.**
