@@ -48,14 +48,18 @@ retype 익스텐션 = MCP 서버 + 커맨드
 | `propose(text, why, file?, line?)` | 회색 제안을 띄우고 사람이 다 칠 때까지 블로킹. `{typed, ms, mistakes}` 또는 `{typed:false, reason}` (`cancelled`·`abandoned`·`timeout`·이미 있으면 `already_present`). 들여쓰기는 파일 설정(탭/스페이스)으로 맞춰준다 |
 | `read_viewport()` | 지금 보이는 파일·줄범위·본문·선택영역 |
 
-## 돌려보기
+## 설치
 
 ```bash
 npm install
-npm test        # match.ts 검사
+npm run install:local   # vsix 빌드 → code --install-extension
 ```
 
-F5(`익스텐션 실행`)로 확장 개발 호스트를 띄운다. 채팅 패널에서 `retype` MCP 서버를 켜면 붙는다.
+**Claude Code 익스텐션이 깔려 있으면 이걸로 끝.** `Cmd+K I`는 그 익스텐션에 든 `claude` 바이너리를 쓰고,
+MCP는 실행할 때 `--mcp-config`로 넘기니까 따로 등록할 게 없다. 없으면 `claude` CLI가 PATH에 있으면 된다.
+
+개발: `npm test`(match 유닛), `npm run test:e2e`(진짜 VS Code 띄워서 MCP 클라이언트로 붙는 검사),
+F5(`익스텐션 실행`).
 
 ## Cmd+K I — 여기서 묻기
 
@@ -77,21 +81,20 @@ F5(`익스텐션 실행`)로 확장 개발 호스트를 띄운다. 채팅 패널
 }
 ```
 
-## Claude Code에 붙이기
+## 다른 클라이언트에서 붙이기 (선택)
 
-포트가 고정(기본 41773)이라 창 밖 클라이언트도 붙는다. 한 번만:
+`Cmd+K I` 말고 Claude Code 패널이나 터미널에서 직접 쓰고 싶으면, 포트가 고정(기본 41773)이라 붙는다:
 
 ```bash
 claude mcp add --transport http --scope user retype http://127.0.0.1:41773/mcp
 ```
 
-VS Code 창이 떠 있는 상태에서 터미널의 Claude Code가 `propose`·`read_viewport`를 쓴다.
-이 저장소 안에서는 `.mcp.json`이 있어 그냥 붙는다. VS Code 창이 둘이면 먼저 뜬 창만 잡는다.
+Copilot agent mode는 익스텐션이 등록해두므로 그냥 보인다. VS Code 창이 둘이면 먼저 뜬 창만 41773을 잡는다.
 
 ## 설정
 
 `retype.port` (기본 41773) — MCP 서버 포트. 0이면 랜덤.
-`retype.claudePath` (기본 `claude`) — `Cmd+K I`가 띄울 CLI. PATH에 없으면 절대경로.
+`retype.claudePath` (기본 비움) — `Cmd+K I`가 띄울 CLI. 비우면 Claude Code 익스텐션 바이너리 → PATH 순.
 `retype.timeoutMinutes` (기본 10) — 따라쓰기 중 입력이 없을 때 포기할 때까지의 분.
 
 ## 안 하는 것

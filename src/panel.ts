@@ -20,6 +20,8 @@ const out = vscode.window.createOutputChannel('retype');
 
 let icons: { me: vscode.Uri; claude: vscode.Uri };
 let store: vscode.Memento;
+/** 이 창의 retype MCP 포트. claude -p에 --mcp-config로 넘겨서 등록 절차 없이 붙인다. */
+let mcpPort = 0;
 
 type Saved = {
   uri: string;
@@ -29,7 +31,8 @@ type Saved = {
   comments: { who: 'me' | 'claude'; body: string; label?: string; ts: number }[];
 };
 
-export function panel(context: vscode.ExtensionContext): vscode.Disposable[] {
+export function panel(context: vscode.ExtensionContext, port: number): vscode.Disposable[] {
+  mcpPort = port;
   icons = {
     me: vscode.Uri.joinPath(context.extensionUri, 'resources/me.svg'),
     claude: vscode.Uri.joinPath(context.extensionUri, 'resources/claude.svg'),
@@ -173,12 +176,19 @@ function runClaude(prompt: string, cwd: string | undefined, resume: string | und
   status.tooltip = prompt;
   status.show();
 
+  // 순서: 사용자가 지정한 경로 → Claude Code 익스텐션이 들고 있는 바이너리(별도 설치 불필요) → PATH
   const cfg = vscode.workspace.getConfiguration('retype');
+  const bundled = vscode.extensions.getExtension('anthropic.claude-code')?.extensionPath;
   const candidates = [
-    cfg.get<string>('claudePath', 'claude'),
+    ...(cfg.get<string>('claudePath') ? [cfg.get<string>('claudePath')!] : []),
+    ...(bundled ? [`${bundled}/resources/native-binary/claude`] : []),
+    'claude',
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',
   ];
+  const mcp = JSON.stringify({
+    mcpServers: { retype: { type: 'http', url: `http://127.0.0.1:${mcpPort}/mcp` } },
+  });
   // --allowedTools는 가변 인자라 프롬프트가 뒤에 오면 삼킨다. 프롬프트가 먼저.
   const args = [
     '-p',
@@ -188,6 +198,9 @@ function runClaude(prompt: string, cwd: string | undefined, resume: string | und
     '--verbose',
     '--append-system-prompt',
     RULES,
+    '--mcp-config',
+    mcp,
+    '--strict-mcp-config',
     '--allowedTools',
     'mcp__retype__propose,mcp__retype__read_viewport',
     ...(resume ? ['--resume', resume] : []),

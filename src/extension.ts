@@ -27,7 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, ghostProvider),
     vscode.commands.registerCommand('retype.cancel', cancelActive),
     vscode.commands.registerCommand('retype.askViewport', askViewport),
-    ...panel(context)
+    ...panel(context, port)
   );
 
   // e2e 테스트가 MCP 클라이언트로 붙을 때 쓴다

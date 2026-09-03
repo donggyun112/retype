@@ -103,8 +103,8 @@
       "properties": {
         "retype.claudePath": {
           "type": "string",
-          "default": "claude",
-          "description": "Cmd+K I로 띄울 claude CLI 경로. PATH에 없으면 절대경로(예: /opt/homebrew/bin/claude)."
+          "default": "",
+          "description": "Cmd+K I로 띄울 claude CLI 경로. 비우면 Claude Code 익스텐션에 든 바이너리 → PATH 순으로 찾는다."
         },
         "retype.port": {
           "type": "number",
