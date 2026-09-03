@@ -10,11 +10,28 @@ function timeoutMs() {
   return Math.max(1, min) * 60_000;
 }
 
+// 채팅 패널(webview)에 포커스가 가면 activeTextEditor가 비어버린다.
+// 마지막으로 활성이었던 텍스트 편집기를 기억해서, 아직 보이면 그걸 쓴다.
+let lastEditor = vscode.window.activeTextEditor;
+const trackEditor = vscode.window.onDidChangeActiveTextEditor((e) => {
+  if (e) lastEditor = e;
+});
+
+function currentEditor(): vscode.TextEditor | undefined {
+  const active = vscode.window.activeTextEditor;
+  if (active) return active;
+  const visible = vscode.window.visibleTextEditors;
+  return (
+    visible.find((e) => e.document.uri.toString() === lastEditor?.document.uri.toString()) ??
+    visible[0]
+  );
+}
+
 async function editorFor(file?: string): Promise<vscode.TextEditor> {
   if (!file) {
-    const active = vscode.window.activeTextEditor;
-    if (!active) throw new Error('열려 있는 편집기가 없다. file을 넘기거나 파일을 열어라.');
-    return active;
+    const editor = currentEditor();
+    if (!editor) throw new Error('열려 있는 편집기가 없다. file을 넘기거나 파일을 열어라.');
+    return editor;
   }
   const uri = file.startsWith('/')
     ? vscode.Uri.file(file)
@@ -24,6 +41,23 @@ async function editorFor(file?: string): Promise<vscode.TextEditor> {
       );
   const doc = await vscode.workspace.openTextDocument(uri);
   return vscode.window.showTextDocument(doc, { preview: false });
+}
+
+/** 줄 시작 들여쓰기만 파일 설정(스페이스/탭, 탭 폭)으로 바꾼다. 줄 안쪽 공백은 안 건드린다. */
+export function normalizeIndent(text: string, opts: vscode.TextEditorOptions): string {
+  const size = typeof opts.tabSize === 'number' ? opts.tabSize : 4;
+  const spaces = opts.insertSpaces !== false;
+  return text
+    .split('\n')
+    .map((line) => {
+      const m = /^[ \t]*/.exec(line)![0];
+      if (!m) return line;
+      let width = 0;
+      for (const ch of m) width = ch === '\t' ? width + size - (width % size) : width + 1;
+      const indent = spaces ? ' '.repeat(width) : '\t'.repeat(Math.floor(width / size)) + ' '.repeat(width % size);
+      return indent + line.slice(m.length);
+    })
+    .join('\n');
 }
 
 function buildServer(): McpServer {
@@ -36,9 +70,11 @@ function buildServer(): McpServer {
       description:
         '코드를 직접 쓰지 말고 이 툴로 제안해라. 편집기에 회색으로 뜨고 사람이 직접 타이핑해야 확정된다. ' +
         '사람이 다 칠 때까지 이 호출은 돌아오지 않는다. 돌아오면 그게 한 덩어리가 끝났다는 신호이니, ' +
-        '그 자리에서 다음 스텝을 제안하거나 물어봐라. 한 번에 한 덩어리(길어야 십여 줄)만 제안해라.',
+        '그 자리에서 다음 스텝을 제안하거나 물어봐라. 한 번에 한 덩어리(길어야 십여 줄)만 제안해라. ' +
+        '들여쓰기는 파일 기준 절대값으로 써라(앞줄이 아니라 파일 전체 구조를 보고). 탭/스페이스는 알아서 맞춘다. ' +
+        '이미 파일에 있는 코드를 다시 제안하면 {typed:false, reason:"already_present"}가 돌아온다 — 그땐 다음으로 넘어가라.',
       inputSchema: {
-        text: z.string().describe('사람이 따라 칠 코드'),
+        text: z.string().describe('사람이 따라 칠 코드. 들여쓰기는 파일 기준 절대값.'),
         why: z.string().describe('왜 이렇게 쓰는지 한 줄. 고스트 위에 그대로 뜬다.'),
         file: z.string().optional().describe('대상 파일. 생략하면 지금 열린 파일.'),
         line: z
@@ -58,7 +94,25 @@ function buildServer(): McpServer {
         editor.revealRange(new vscode.Range(anchorPos, anchorPos));
       }
       const anchor = editor.document.offsetAt(anchorPos);
-      const result = await propose(editor, anchor, text, why, timeoutMs());
+      const doc = editor.document;
+
+      // 탭/스페이스는 파일 설정을 따른다. 사람이 이걸 신경 쓸 이유가 없다.
+      text = normalizeIndent(text, editor.options);
+
+      // 이미 있는 코드를 다시 제안했으면 치게 하지 않는다.
+      const ahead = doc.getText(new vscode.Range(doc.positionAt(anchor), doc.positionAt(anchor + text.length + 64)));
+      if (text.trim() && ahead.replace(/\s+/g, ' ').trim().startsWith(text.replace(/\s+/g, ' ').trim())) {
+        const result = { typed: false, reason: 'already_present' };
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
+
+      // 앵커가 줄 중간(앞에 코드가 있음)인데 제안이 줄바꿈 없이 시작하면, 사람은 어차피 Enter부터
+      // 치니까 제안 앞에 \n을 붙여 맞춘다. 단 한 줄짜리 비들여쓰기 제안은 같은 줄에 이어 쓰는 걸로 본다.
+      const before = doc.lineAt(anchorPos.line).text.slice(0, anchorPos.character);
+      const midLine = before.trim().length > 0;
+      const wantsOwnLine = /^[ \t]/.test(text) || text.includes('\n');
+      const target = midLine && wantsOwnLine && !text.startsWith('\n') ? '\n' + text : text;
+      const result = await propose(editor, anchor, target, why, timeoutMs());
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
   );
@@ -73,7 +127,7 @@ function buildServer(): McpServer {
       inputSchema: {},
     },
     async () => {
-      const editor = vscode.window.activeTextEditor;
+      const editor = currentEditor();
       if (!editor) {
         return { content: [{ type: 'text', text: '열려 있는 편집기가 없다.' }], isError: true };
       }
@@ -132,15 +186,33 @@ export function startServer(): Promise<{ port: number; dispose: () => void }> {
   httpServer.headersTimeout = 0;
   httpServer.timeout = 0;
 
-  return new Promise((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(0, '127.0.0.1', () => {
-      const addr = httpServer.address();
-      if (typeof addr === 'string' || addr === null) {
-        reject(new Error('포트를 못 잡았다'));
-        return;
-      }
-      resolve({ port: addr.port, dispose: () => httpServer.close() });
+  // 고정 포트면 창 밖의 클라이언트(Claude Code 등)가 주소를 미리 알 수 있다.
+  // 다른 창이 이미 잡고 있으면 랜덤으로 물러난다.
+  const wanted = vscode.workspace.getConfiguration('retype').get<number>('port', 0);
+  const listen = (port: number) =>
+    new Promise<number>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(port, '127.0.0.1', () => {
+        httpServer.removeAllListeners('error');
+        const addr = httpServer.address();
+        if (typeof addr === 'string' || addr === null) reject(new Error('포트를 못 잡았다'));
+        else resolve(addr.port);
+      });
     });
-  });
+
+  return listen(wanted)
+    .catch((err) => {
+      if (wanted === 0 || err?.code !== 'EADDRINUSE') throw err;
+      vscode.window.showWarningMessage(
+        `retype: ${wanted} 포트를 다른 창이 쓰고 있어 랜덤 포트로 띄웠다. 창 밖 클라이언트는 이 창에 못 붙는다.`
+      );
+      return listen(0);
+    })
+    .then((port) => ({
+      port,
+      dispose: () => {
+        trackEditor.dispose();
+        httpServer.close();
+      },
+    }));
 }

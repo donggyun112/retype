@@ -22,10 +22,21 @@ retype 익스텐션 = MCP 서버 + 커맨드
 ## 세 가지
 
 **따라쓰기** — 에이전트가 `propose(text, why)`를 부르면 회색 제안이 뜨고 호출이 멈춘다.
-사람이 다 쳐야 돌아간다. `why`는 CodeLens로 고스트 위 한 줄에 붙는다.
+사람이 다 쳐야 돌아간다. 회색은 인라인 완성(여러 줄 통째로)으로 그리고, 따라쓰는 동안 Tab은
+수락이 아니라 들여쓰기, Cmd+→는 줄 끝 이동이다. 줄 시작 들여쓰기는 사람이 안 친다 — Enter 치면
+자동 들여쓰기가 뭘 넣든 retype이 제안의 들여쓰기로 바꿔놓는다(dedent 포함). 코드는 사람이, 공백은 편집기가.
+커서가 줄 중간일 때 들여쓰기 있는/여러 줄 제안이 오면 제안 앞에 줄바꿈을 붙여 "Enter부터"로 맞춘다.
+
+언어 자동완성 팝업을 같이 쓰려면 settings.json에 이게 필요하다. VS Code 기본값
+`offWhenInlineCompletions`는 고스트가 떠 있는 동안 팝업을 안 띄운다:
+
+```json
+"editor.quickSuggestions": { "other": "on", "comments": "off", "strings": "off" }
+``` `why`는 CodeLens로 고스트 위 한 줄에 붙는다.
 
 **구간 질문** — `Cmd+K Q`(win/linux `Ctrl+K Q`)로 지금 화면에 보이는 구간을 질문으로 만들어
-채팅을 연다. 에이전트 쪽에서는 `read_viewport()`로 본문을 당겨간다.
+채팅을 연다. Claude Code 익스텐션이 있으면 그 입력창에 `@file#L1-20`으로, Copilot Chat이면
+`#file` 머리말로, 둘 다 없으면 클립보드로. 에이전트 쪽에서는 `read_viewport()`로 본문을 당겨간다.
 
 **다음 스텝** — 별도 툴이 없다. `propose`가 돌아온다는 것 자체가 한 덩어리가 끝났다는
 신호라, 에이전트가 그 자리에서 다음을 제안한다.
@@ -34,7 +45,7 @@ retype 익스텐션 = MCP 서버 + 커맨드
 
 | 툴 | 하는 일 |
 |---|---|
-| `propose(text, why, file?, line?)` | 회색 제안을 띄우고 사람이 다 칠 때까지 블로킹. `{typed, ms, mistakes}` 또는 `{typed:false, reason}` |
+| `propose(text, why, file?, line?)` | 회색 제안을 띄우고 사람이 다 칠 때까지 블로킹. `{typed, ms, mistakes}` 또는 `{typed:false, reason}` (`cancelled`·`abandoned`·`timeout`·이미 있으면 `already_present`). 들여쓰기는 파일 설정(탭/스페이스)으로 맞춰준다 |
 | `read_viewport()` | 지금 보이는 파일·줄범위·본문·선택영역 |
 
 ## 돌려보기
@@ -46,8 +57,41 @@ npm test        # match.ts 검사
 
 F5(`익스텐션 실행`)로 확장 개발 호스트를 띄운다. 채팅 패널에서 `retype` MCP 서버를 켜면 붙는다.
 
+## Cmd+K I — 여기서 묻기
+
+편집기에서 `Cmd+K I`(win/linux `Ctrl+K I`, 또는 거터의 `+`) → 커서 줄 밑에 입력창이 붙는다.
+할 일을 적고 `⌘⏎` → `claude -p`가 백그라운드로 돌고, 답이 같은 스레드에 달린다. 이어서 물으면
+같은 세션(`--resume`)으로 가서 그 스레드의 이전 대화를 다 들고 시작한다. 스레드는 워크스페이스에
+저장되어 리로드해도 남는다(접힌 채로, 거터 아이콘 클릭). 다른 스레드끼리는 서로 모른다. 코드는 고스트로 오고 "Edit 말고 propose로" 규칙은
+`--append-system-prompt`로 같이 들어간다. 상태바에 도는 아이콘이 진행 표시.
+
+
+위젯 색은 VS Code 설정으로만 바꿀 수 있다. settings.json에:
+
+```json
+"workbench.colorCustomizations": {
+  "editorCommentsWidget.unresolvedBorder": "#D97757",
+  "editorCommentsWidget.resolvedBorder": "#D9775766",
+  "editorCommentsWidget.rangeBackground": "#D9775714",
+  "editorCommentsWidget.replyInputBackground": "#00000033"
+}
+```
+
+## Claude Code에 붙이기
+
+포트가 고정(기본 41773)이라 창 밖 클라이언트도 붙는다. 한 번만:
+
+```bash
+claude mcp add --transport http --scope user retype http://127.0.0.1:41773/mcp
+```
+
+VS Code 창이 떠 있는 상태에서 터미널의 Claude Code가 `propose`·`read_viewport`를 쓴다.
+이 저장소 안에서는 `.mcp.json`이 있어 그냥 붙는다. VS Code 창이 둘이면 먼저 뜬 창만 잡는다.
+
 ## 설정
 
+`retype.port` (기본 41773) — MCP 서버 포트. 0이면 랜덤.
+`retype.claudePath` (기본 `claude`) — `Cmd+K I`가 띄울 CLI. PATH에 없으면 절대경로.
 `retype.timeoutMinutes` (기본 10) — 따라쓰기 중 입력이 없을 때 포기할 때까지의 분.
 
 ## 안 하는 것

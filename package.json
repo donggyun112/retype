@@ -3,6 +3,7 @@
   "displayName": "retype",
   "description": "AI가 코드를 적용하는 대신 불러준다. 사람이 직접 친다.",
   "version": "0.1.0",
+  "publisher": "dongkseo",
   "private": true,
   "engines": {
     "vscode": "^1.101.0"
@@ -24,6 +25,20 @@
     ],
     "commands": [
       {
+        "command": "retype.ask",
+        "title": "retype: 여기서 claude에게 묻기"
+      },
+      {
+        "command": "retype.submit",
+        "title": "claude에게",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "retype.close",
+        "title": "닫기",
+        "icon": "$(close)"
+      },
+      {
         "command": "retype.askViewport",
         "title": "retype: 이 구간 물어보기"
       },
@@ -32,7 +47,25 @@
         "title": "retype: 따라쓰기 취소"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        { "command": "retype.submit", "when": "false" },
+        { "command": "retype.close", "when": "false" }
+      ],
+      "comments/commentThread/context": [
+        { "command": "retype.submit", "group": "inline", "when": "commentController == retype" }
+      ],
+      "comments/commentThread/title": [
+        { "command": "retype.close", "group": "inline", "when": "commentController == retype" }
+      ]
+    },
     "keybindings": [
+      {
+        "command": "retype.ask",
+        "key": "ctrl+k i",
+        "mac": "cmd+k i",
+        "when": "editorTextFocus"
+      },
       {
         "command": "retype.askViewport",
         "key": "cmd+k q",
@@ -44,11 +77,39 @@
         "command": "retype.cancel",
         "key": "escape",
         "when": "editorTextFocus && retype.active"
+      },
+      {
+        "command": "tab",
+        "key": "tab",
+        "when": "editorTextFocus && retype.active && inlineSuggestionVisible && !suggestWidgetVisible && !editorTabMovesFocus"
+      },
+      {
+        "command": "cursorEnd",
+        "key": "cmd+right",
+        "mac": "cmd+right",
+        "when": "editorTextFocus && retype.active && inlineSuggestionVisible"
+      },
+      {
+        "command": "cursorWordEndRight",
+        "key": "ctrl+right",
+        "win": "ctrl+right",
+        "linux": "ctrl+right",
+        "when": "editorTextFocus && retype.active && inlineSuggestionVisible"
       }
     ],
     "configuration": {
       "title": "retype",
       "properties": {
+        "retype.claudePath": {
+          "type": "string",
+          "default": "claude",
+          "description": "Cmd+K I로 띄울 claude CLI 경로. PATH에 없으면 절대경로(예: /opt/homebrew/bin/claude)."
+        },
+        "retype.port": {
+          "type": "number",
+          "default": 41773,
+          "description": "MCP 서버 포트. 0이면 랜덤. 창 밖 클라이언트(Claude Code 등)를 붙이려면 고정해야 한다."
+        },
         "retype.timeoutMinutes": {
           "type": "number",
           "default": 10,
@@ -58,9 +119,13 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p .",
+    "package": "npx @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl file:. --baseImagesUrl file:.",
+    "install:local": "npm run package && code --install-extension retype-0.1.0.vsix --force",
     "watch": "tsc -p . -w",
-    "test": "tsc -p . && node out/match.test.js"
+    "test": "tsc -p . && node out/match.test.js",
+    "test:e2e": "tsc -p . && node out/e2e/runTests.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -69,6 +134,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.101.0",
+    "@vscode/test-electron": "^3.1.0",
     "typescript": "^5.6.0"
   }
 }

@@ -1,0 +1,10 @@
+.vscode/**
+.vscode-test/**
+.mcp.json
+src/**
+docs/**
+out/**/*.map
+out/e2e/**
+out/*.test.js
+tsconfig.json
+**/.gitignore

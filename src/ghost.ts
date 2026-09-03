@@ -3,15 +3,7 @@ import { match } from './match';
 
 export type ProposeResult =
   | { typed: true; ms: number; mistakes: number }
-  | { typed: false; reason: 'abandoned' | 'timeout' | 'cancelled' };
-
-const ghostDeco = vscode.window.createTextEditorDecorationType({
-  after: {
-    color: new vscode.ThemeColor('editorGhostText.foreground'),
-    fontStyle: 'italic',
-  },
-  rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
-});
+  | { typed: false; reason: 'abandoned' | 'timeout' | 'cancelled' | 'already_present' };
 
 const mistakeDeco = vscode.window.createTextEditorDecorationType({
   textDecoration: 'underline wavy var(--vscode-editorError-foreground)',
@@ -20,6 +12,24 @@ const mistakeDeco = vscode.window.createTextEditorDecorationType({
 
 /** 지금 진행 중인 따라쓰기. 한 번에 하나만 돈다. */
 let active: Session | null = null;
+
+/**
+ * 회색 = 인라인 완성. 여러 줄을 통째로 그려주는 유일한 공개 API다.
+ * Tab·Cmd+→ 같은 수락 키는 package.json에서 retype.active일 때 원래 동작(들여쓰기·줄 끝)으로 돌려둔다.
+ */
+export const ghostProvider: vscode.InlineCompletionItemProvider = {
+  provideInlineCompletionItems(document, position) {
+    if (!active || active.doc.uri.toString() !== document.uri.toString()) return [];
+    const offset = document.offsetAt(position);
+    // 커서가 친 범위 밖(앞쪽이나 기존 코드 위)이면 회색도 없다
+    if (offset < active.anchor || offset > active.end) return [];
+    const typed = document.getText(new vscode.Range(document.positionAt(active.anchor), position));
+    const state = match(active.target, typed);
+    if (state.done || !state.remaining) return [];
+    // 틀려도 남은 부분은 계속 보여준다. 틀린 글자는 빨간 밑줄이 알려준다.
+    return [{ insertText: state.remaining, range: new vscode.Range(position, position) }];
+  },
+};
 
 /** why를 고스트 위 한 줄로 띄우기 위한 CodeLens 소스 */
 const lensChanged = new vscode.EventEmitter<void>();
@@ -40,7 +50,10 @@ export const whyLensProvider: vscode.CodeLensProvider = {
 
 class Session {
   readonly doc: vscode.TextDocument;
-  readonly anchor: number;
+  /** 고스트가 시작하는 오프셋. 앞쪽이 편집되면 따라 움직인다. */
+  anchor: number;
+  /** 세션 시작 후 실제로 끼워넣은 텍스트의 끝. anchor..end 만 판정 대상이고, 그 뒤 기존 코드는 안 본다. */
+  end: number;
   readonly target: string;
   readonly why: string;
 
@@ -65,6 +78,7 @@ class Session {
   ) {
     this.doc = editor.document;
     this.anchor = anchor;
+    this.end = anchor;
     this.target = target;
     this.why = why;
     this.timeoutMs = timeoutMs;
@@ -78,7 +92,24 @@ class Session {
 
     this.disposables.push(
       vscode.workspace.onDidChangeTextDocument((e) => {
-        if (e.document.uri.toString() === this.doc.uri.toString()) this.render();
+        if (e.document.uri.toString() !== this.doc.uri.toString()) return;
+        // 앵커 앞이 바뀌면(윗줄 삭제 등) 앵커·끝이 같이 밀린다. 앵커를 걸쳐 지우면 그 자리로 당긴다.
+        // anchor..end 안의 편집은 끝을 늘리거나 줄인다. 끝 너머(기존 코드) 편집은 무시한다.
+        for (const c of e.contentChanges) {
+          const s = c.rangeOffset;
+          const e2 = s + c.rangeLength;
+          const delta = c.text.length - c.rangeLength;
+          if (e2 < this.anchor || (e2 === this.anchor && c.rangeLength > 0)) {
+            this.anchor += delta;
+            this.end += delta;
+          } else if (s < this.anchor) {
+            this.anchor = s;
+            this.end = s + c.text.length;
+          } else if (s <= this.end) {
+            this.end = e2 <= this.end ? this.end + delta : s + c.text.length;
+          }
+        }
+        this.render();
       }),
       vscode.window.onDidChangeTextEditorSelection((e) => {
         if (e.textEditor.document.uri.toString() === this.doc.uri.toString()) this.render();
@@ -98,6 +129,8 @@ class Session {
     vscode.commands.executeCommand('setContext', 'retype.active', true);
     lensChanged.fire();
     this.render();
+    // 시작할 땐 커서가 가만히 있으니 한 번 찔러준다. 그 뒤론 타이핑마다 VS Code가 알아서 다시 묻는다.
+    vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
   }
 
   cancel() {
@@ -115,8 +148,9 @@ class Session {
     const editor = this.editor();
     if (!editor) return;
 
-    // 사람이 친 것 = 앵커부터 커서까지
-    const cursor = editor.document.offsetAt(editor.selection.active);
+    // 사람이 친 것 = 앵커부터 커서까지, 단 끼워넣은 범위(end)를 넘지 않는다.
+    // 괄호 자동 닫힘은 end엔 들어가지만 커서 뒤라서 아직 친 걸로 안 친다.
+    const cursor = Math.min(editor.document.offsetAt(editor.selection.active), this.end);
     const typed =
       cursor > this.anchor
         ? editor.document.getText(
@@ -126,6 +160,10 @@ class Session {
             )
           )
         : '';
+
+    // 줄 시작 들여쓰기는 사람이 아니라 retype이 맞춘다. Enter 직후 자동 들여쓰기가
+    // 목표와 다르면(dedent 등) 그 공백을 목표 공백으로 갈아끼운다. 코드는 사람이, 공백은 편집기가.
+    if (this.fixIndent(editor, typed, cursor)) return; // 편집이 이벤트를 다시 부른다
 
     const state = match(this.target, typed);
 
@@ -147,23 +185,7 @@ class Session {
       return;
     }
 
-    // 회색: 남은 것의 첫 줄만 인라인으로. 나머지는 hover와 줄 수로 알린다.
-    // 데코레이션에서 연속 공백이 뭉개지지 않게 non-breaking space로 그린다.
-    const lines = state.remaining.split('\n');
-    const head = lines[0].replace(/ /g, ' ') || (lines.length > 1 ? '⏎' : '');
-    const tail = lines.length > 1 ? `  ⏎ +${lines.length - 1}줄` : '';
-    const hover = new vscode.MarkdownString(
-      `**왜:** ${this.why}\n\n\`\`\`\n${state.remaining}\n\`\`\``
-    );
-
-    const at = editor.document.positionAt(cursor);
-    editor.setDecorations(ghostDeco, [
-      {
-        range: new vscode.Range(at, at),
-        renderOptions: { after: { contentText: head + tail } },
-        hoverMessage: hover,
-      },
-    ]);
+    // 회색은 ghostProvider가 그린다. 여기선 안 건드린다 — 매번 찌르면 자동완성 팝업이 밀린다.
 
     // 빨간 밑줄: 어긋나기 시작한 지점부터 커서까지
     editor.setDecorations(
@@ -184,16 +206,39 @@ class Session {
     this.status.tooltip = this.why;
   }
 
+  /** typed가 "…\n" + 공백으로 끝나고 커서가 그 끝이면, 공백을 목표 들여쓰기로 맞춘다. 편집했으면 true. */
+  private fixIndent(editor: vscode.TextEditor, typed: string, cursor: number): boolean {
+    const m = /(^|\n)([ \t]*)$/.exec(typed);
+    if (!m) return false;
+    if (m[1] === '' && this.anchor !== editor.document.offsetAt(editor.document.lineAt(editor.document.positionAt(this.anchor).line).range.start)) {
+      return false; // 앵커가 줄 중간이면 앵커 직후 공백은 들여쓰기가 아니다
+    }
+    const typedIndent = m[2];
+    const base = typed.slice(0, typed.length - typedIndent.length);
+    const s = match(this.target, base);
+    if (s.mistakeAt !== null || s.done) return false;
+    const targetIndent = /^[ \t]*/.exec(this.target.slice(s.consumed))![0];
+    if (targetIndent === typedIndent) return false;
+    if (editor.document.offsetAt(editor.selection.active) !== cursor) return false;
+    const from = editor.document.positionAt(cursor - typedIndent.length);
+    const to = editor.document.positionAt(cursor);
+    editor.edit((b) => b.replace(new vscode.Range(from, to), targetIndent), {
+      undoStopBefore: false,
+      undoStopAfter: false,
+    });
+    return true;
+  }
+
   private finish(result: ProposeResult) {
     if (this.done) return;
     this.done = true;
     clearTimeout(this.timer);
     this.disposables.forEach((d) => d.dispose());
     const editor = this.editor();
-    editor?.setDecorations(ghostDeco, []);
     editor?.setDecorations(mistakeDeco, []);
     this.status.dispose();
     active = null;
+    vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
     vscode.commands.executeCommand('setContext', 'retype.active', false);
     lensChanged.fire();
     this.settle(result);

@@ -37,10 +37,12 @@ export function match(target: string, typed: string): MatchState {
     u++;
   }
 
-  // 입력이 끝났는데 목표에 공백만 남았다면 그 공백은 미리 먹고 들어간다.
-  // (자동 들여쓰기가 아직 안 온 상태에서 회색이 공백부터 시작하는 걸 막는다)
+  // 입력이 끝났는데 목표에 *끝까지* 공백만 남았다면 끝난 걸로 친다.
+  // 줄 중간의 들여쓰기는 미리 먹지 않는다 — 회색에 그대로 보이고, 실제로 쳐야 한다.
   if (u === typed.length) {
-    while (t < target.length && isSpace(target[t])) t++;
+    let k = t;
+    while (k < target.length && isSpace(target[k])) k++;
+    if (k === target.length) t = k;
   }
 
   const mistakeAt = u < typed.length ? u : null;

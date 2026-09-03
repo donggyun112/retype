@@ -65,11 +65,17 @@ import { match } from './match';
   assert.equal(s.remaining, 'return 1');
 }
 
-// 자동 들여쓰기가 아직 안 왔어도 회색은 공백부터 보여주지 않는다
+// 자동 들여쓰기가 아직 안 왔으면 회색은 들여쓰기부터 보여준다. 쳐야 한다
 {
   const s = match('if x:\n    return 1', 'if x:\n');
   assert.equal(s.mistakeAt, null);
-  assert.equal(s.remaining, 'return 1');
+  assert.equal(s.remaining, '    return 1');
+}
+
+// 들여쓰기를 건너뛰고 치면 오타다 (회색에 보이는 것과 같은 규칙)
+{
+  const s = match('if x:\n    return 1', 'if x:\nr');
+  assert.equal(s.mistakeAt, 6);
 }
 
 // 탭과 스페이스를 섞어도 공백은 공백이다
