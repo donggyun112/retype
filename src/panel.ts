@@ -6,7 +6,10 @@ import * as fs from 'node:fs';
 
 const RULES =
   '코드를 쓸 때는 Edit/Write 대신 retype의 propose(text, why)로 제안한다. 한 번에 한 덩어리(길어야 십여 줄). ' +
-  'propose가 돌아오면 그 자리에서 다음 덩어리를 제안한다. "여기"·"이 부분"은 read_viewport()로 읽는다.';
+  'propose가 돌아오면 그 자리에서 다음 덩어리를 제안한다. "여기"·"이 부분"은 read_viewport()로 읽는다. ' +
+  // 답은 편집기 줄 밑 좁은 댓글 위젯에 뜬다. 길면 못 읽는다.
+  '말은 편집기 안 작은 댓글 위젯에 뜬다. 한국어로, 서론·요약·되풀이 없이 결론만 두세 문장. ' +
+  '코드는 말로 설명하지 말고 propose로 보여라. 채팅에 코드 블록을 넣지 마라.';
 
 const controller = vscode.comments.createCommentController('retype', 'retype');
 controller.commentingRangeProvider = {
