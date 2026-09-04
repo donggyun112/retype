@@ -75,11 +75,10 @@ F5(`익스텐션 실행`).
 `--append-system-prompt`로 같이 들어간다. 상태바에 도는 아이콘이 진행 표시.
 
 
-위젯의 폰트·크기는 편집기 설정(`editor.fontSize` 등)을 그대로 따르고, 색과 높이는 VS Code 설정으로만
-바꿀 수 있다. settings.json에:
+위젯의 폰트·크기는 편집기 설정(`editor.fontSize` 등)을 그대로 따른다. 대화가 길어지면 위젯 높이가
+잘리고 안에서 스크롤한다(VS Code 기본 `comments.maxHeight`). 색은 settings.json에:
 
 ```json
-"comments.maxHeight": false,
 "workbench.colorCustomizations": {
   "editorCommentsWidget.unresolvedBorder": "#D97757",
   "editorCommentsWidget.resolvedBorder": "#D9775766",
