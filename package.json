@@ -45,10 +45,6 @@
         "icon": "$(close)"
       },
       {
-        "command": "retype.history",
-        "title": "retype: 이전 대화 펼치기/접기"
-      },
-      {
         "command": "retype.askViewport",
         "title": "retype: 이 구간 물어보기"
       },
@@ -61,7 +57,6 @@
       "commandPalette": [
         { "command": "retype.submit", "when": "false" },
         { "command": "retype.submitCodex", "when": "false" },
-        { "command": "retype.history", "when": "false" },
         { "command": "retype.close", "when": "false" }
       ],
       "comments/commentThread/context": [
