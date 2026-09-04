@@ -35,6 +35,11 @@
         "enablement": "!commentIsEmpty"
       },
       {
+        "command": "retype.submitCodex",
+        "title": "codex에게",
+        "enablement": "!commentIsEmpty"
+      },
+      {
         "command": "retype.close",
         "title": "닫기",
         "icon": "$(close)"
@@ -51,10 +56,14 @@
     "menus": {
       "commandPalette": [
         { "command": "retype.submit", "when": "false" },
+        { "command": "retype.submitCodex", "when": "false" },
         { "command": "retype.close", "when": "false" }
       ],
       "comments/commentThread/context": [
-        { "command": "retype.submit", "group": "inline", "when": "commentController == retype" }
+        { "command": "retype.submit", "group": "inline@1", "when": "commentController == retype && config.retype.agent != codex" },
+        { "command": "retype.submitCodex", "group": "inline@2", "when": "commentController == retype && config.retype.agent != codex" },
+        { "command": "retype.submitCodex", "group": "inline@1", "when": "commentController == retype && config.retype.agent == codex" },
+        { "command": "retype.submit", "group": "inline@2", "when": "commentController == retype && config.retype.agent == codex" }
       ],
       "comments/commentThread/title": [
         { "command": "retype.close", "group": "inline", "when": "commentController == retype" }
@@ -105,7 +114,7 @@
           "type": "string",
           "enum": ["claude", "codex"],
           "default": "claude",
-          "description": "Cmd+K I가 부를 에이전트. claude = Claude Code, codex = OpenAI Codex CLI."
+          "description": "댓글 위젯에서 ⌘⏎(첫 번째 버튼)가 부를 에이전트. 둘 다 버튼으로 있다."
         },
         "retype.codexPath": {
           "type": "string",

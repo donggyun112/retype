@@ -14,12 +14,13 @@ controller.commentingRangeProvider = {
 };
 controller.options = { prompt: 'claude에게 (⌘⏎)', placeHolder: '여기에 뭘 할까' };
 
-/** 살아 있는 스레드와 그 claude 세션. 이어 물으면 --resume. workspaceState에 저장한다. */
-const threads = new Map<vscode.CommentThread, { session?: string }>();
+/** 살아 있는 스레드와 그 에이전트 세션. 이어 물으면 resume. 에이전트를 바꾸면 세션은 새로. workspaceState에 저장한다. */
+const threads = new Map<vscode.CommentThread, { session?: string; agent?: string }>();
 let running: ChildProcess | null = null;
 const out = vscode.window.createOutputChannel('retype');
 
-let icons: { me: vscode.Uri; claude: vscode.Uri };
+type Who = 'me' | 'claude' | 'codex';
+let icons: Record<Who, vscode.Uri>;
 let store: vscode.Memento;
 /** 이 창의 retype MCP 포트. claude -p에 --mcp-config로 넘겨서 등록 절차 없이 붙인다. */
 let mcpPort = 0;
@@ -29,7 +30,8 @@ type Saved = {
   start: number;
   end: number;
   session?: string;
-  comments: { who: 'me' | 'claude'; body: string; label?: string; ts: number }[];
+  agent?: string;
+  comments: { who: Who; body: string; label?: string; ts: number }[];
 };
 
 export function panel(context: vscode.ExtensionContext, port: number): vscode.Disposable[] {
@@ -37,6 +39,7 @@ export function panel(context: vscode.ExtensionContext, port: number): vscode.Di
   icons = {
     me: vscode.Uri.joinPath(context.extensionUri, 'resources/me.svg'),
     claude: vscode.Uri.joinPath(context.extensionUri, 'resources/claude.svg'),
+    codex: vscode.Uri.joinPath(context.extensionUri, 'resources/codex.svg'),
   };
   store = context.workspaceState;
   restore();
@@ -46,7 +49,8 @@ export function panel(context: vscode.ExtensionContext, port: number): vscode.Di
     vscode.commands.registerCommand('retype.ask', () =>
       vscode.commands.executeCommand('workbench.action.addComment')
     ),
-    vscode.commands.registerCommand('retype.submit', submit),
+    vscode.commands.registerCommand('retype.submit', (r: vscode.CommentReply) => submit(r, claude)),
+    vscode.commands.registerCommand('retype.submitCodex', (r: vscode.CommentReply) => submit(r, codex)),
     vscode.commands.registerCommand('retype.close', (t: vscode.CommentThread) => {
       threads.delete(t);
       t.dispose();
@@ -63,8 +67,9 @@ function save() {
       start: t.range?.start.line ?? 0,
       end: t.range?.end.line ?? 0,
       session: meta.session,
+      agent: meta.agent,
       comments: t.comments.map((c) => ({
-        who: c.author.name === '나' ? 'me' : 'claude',
+        who: c.author.name === '나' ? 'me' : c.author.name === 'codex' ? 'codex' : 'claude',
         body: typeof c.body === 'string' ? c.body : c.body.value,
         label: c.label,
         ts: c.timestamp?.getTime() ?? Date.now(),
@@ -88,17 +93,13 @@ function restore() {
     t.label = 'retype';
     t.canReply = true;
     t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    threads.set(t, { session: s.session });
+    threads.set(t, { session: s.session, agent: s.agent });
   }
 }
 
-function comment(
-  who: 'me' | 'claude',
-  body: string | vscode.MarkdownString,
-  at = new Date()
-): vscode.Comment {
+function comment(who: Who, body: string | vscode.MarkdownString, at = new Date()): vscode.Comment {
   return {
-    author: { name: who === 'me' ? '나' : 'claude', iconPath: icons[who] },
+    author: { name: who === 'me' ? '나' : who, iconPath: icons[who] },
     body,
     mode: vscode.CommentMode.Preview,
     timestamp: at,
@@ -111,7 +112,7 @@ function md(text: string) {
   return m;
 }
 
-async function submit(reply: vscode.CommentReply) {
+async function submit(reply: vscode.CommentReply, agent: Agent) {
   const { thread, text } = reply;
   if (!text.trim()) return;
   // 위젯이 다시 그려지면 스크롤이 튀니까, 이미 맞는 값이면 안 건드린다
@@ -123,6 +124,10 @@ async function submit(reply: vscode.CommentReply) {
   thread.comments = [...thread.comments, comment('me', text)];
   const meta = threads.get(thread) ?? {};
   threads.set(thread, meta);
+  if (meta.agent !== agent.name) {
+    meta.session = undefined; // 다른 에이전트의 세션은 못 잇는다
+    meta.agent = agent.name;
+  }
   save();
 
   const file = vscode.workspace.asRelativePath(thread.uri);
@@ -134,7 +139,7 @@ async function submit(reply: vscode.CommentReply) {
   const prompt = resume ? text : `${where}: ${text}`;
   const cwd = vscode.workspace.getWorkspaceFolder(thread.uri)?.uri.fsPath;
 
-  const answer = comment('claude', md('$(loading~spin) 생각 중'));
+  const answer = comment(agent.name as Who, md('$(loading~spin) 생각 중'));
   thread.comments = [...thread.comments, answer];
   let acc = '';
   const say = (t: string) => {
@@ -144,7 +149,7 @@ async function submit(reply: vscode.CommentReply) {
   };
 
   // VS Code는 이 커맨드가 리턴해야 입력창을 비운다. 그러니 기다리지 말고 뒤에서 돌린다.
-  void runClaude(prompt, cwd, resume, {
+  void runAgent(agent, prompt, cwd, resume, {
     text: say,
     tool: (name, input) =>
       say(
@@ -279,14 +284,15 @@ const codex: Agent = {
   },
 };
 
-function currentAgent(): Agent {
-  return vscode.workspace.getConfiguration('retype').get<string>('agent') === 'codex' ? codex : claude;
-}
-
 /** 에이전트를 백그라운드로 돌린다. 코드는 고스트로 오고, 말은 hooks.text로 온다. */
-function runClaude(prompt: string, cwd: string | undefined, resume: string | undefined, on: Hooks) {
+function runAgent(
+  agent: Agent,
+  prompt: string,
+  cwd: string | undefined,
+  resume: string | undefined,
+  on: Hooks
+) {
   running?.kill();
-  const agent = currentAgent();
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
   status.text = `$(sync~spin) ${agent.name}`;
